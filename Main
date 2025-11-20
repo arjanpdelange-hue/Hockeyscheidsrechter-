@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5"> <title>Hockey Arbitrage App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        :root {
+            --home-color: #800000; /* Bordeaux Rood voor BMHV */
+            --away-color: #3b82f6; /* Blauw voor Gastteam */
+            --green: #22c55e;
+            --yellow: #facc15; 
+            --red: #ef4444;
+            --field-color: #a8e0a8; /* Lichtgroen veld (niet gebruikt, maar voor consistentie) */
+            --line-color: #ffffff; /* Witte lijnen (niet gebruikt, maar voor consistentie) */
+        }
+        /* Kleinere padding op body voor full screen mobiele look */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f3f4f6;
+            padding: 0.5rem; /* Minder padding op mobiel */
+        }
+        .card-btn {
+            display: flex;
+            flex-direction: column; 
+            align-items: center;
+            justify-content: center;
+            height: 6rem;
+            width: 100%;
+            font-weight: bold;
+            background-color: white;
+            transition: transform 0.1s;
+        }
+        .card-btn:active { transform: scale(0.95); }
+        .card-shape { font-size: 2rem; width: 2.5rem; height: 2.5rem; }
+        
+        .green-triangle { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); background-color: var(--green); }
+        .yellow-square-5, .yellow-square-10 { background-color: var(--yellow); }
+        .red-circle { border-radius: 50%; background-color: var(--red); }
+
+        .score-btn {
+            background-color: var(--away-color);
+            color: white;
+            font-weight: bold;
+            padding: 0.75rem 0;
+            border-radius: 0.5rem;
+            transition: background-color 0.1s;
+        }
+        .score-btn:hover { background-color: #306bd1; }
+
+        /* Custom kleuren voor teamnamen en score */
+        .home-team-text { color: var(--home-color); }
+        .away-team-text { color: var(--away-color); }
+
+        .active-timer {
+            animation: pulse-red 1s infinite alternate;
+        }
+        @keyframes pulse-red {
+            from { box-shadow: 0 0 0px var(--red); }
+            to { box-shadow: 0 0 10px var(--red); }
+        }
+        .paused-state {
+            background-color: #fef3c7; 
+        }
+    </style>
+</head>
+<body class="p-2 sm:p-6">
+
+    <div id="app" class="w-full max-w-4xl mx-auto bg-white shadow-xl rounded-xl p-4 sm:p-6 space-y-6">
+
+        <h1 class="text-3xl font-extrabold text-center text-gray-800 mb-6">Veldhockey</h1>
+
+        <div class="flex items-center justify-between space-x-2 text-center">
+            <div class="w-5/12">
+                <input id="home-team-input" value="BMHV" class="w-full text-lg sm:text-2xl font-bold p-1 rounded-lg home-team-text bg-red-50 border-2 border-red-200 text-center" onchange="updateTeamName('home', this.value)">
+                <p id="home-score" class="text-5xl font-black home-team-text mt-1 sm:text-7xl">0</p>
+            </div>
+            <div class="text-4xl font-extrabold text-gray-400 w-2/12">-</div>
+            <div class="w-5/12">
+                <input id="away-team-input" value="Gastteam" class="w-full text-lg sm:text-2xl font-bold p-1 rounded-lg away-team-text bg-blue-50 border-2 border-blue-200 text-center" onchange="updateTeamName('away', this.value)">
+                <p id="away-score" class="text-5xl font-black away-team-text mt-1 sm:text-7xl">0</p>
+            </div>
+        </div>
+
+        <div class="bg-indigo-600 text-white p-4 sm:p-6 rounded-lg text-center shadow-lg">
+            <p id="quarter-display" class="text-xl sm:text-2xl font-bold">1e Kwart</p>
+            <p id="match-timer" class="text-7xl sm:text-9xl font-extrabold my-2">17:30</p>
+        </div>
+
+        <div class="flex justify-center">
+            <button onclick="startPauseMatch()" id="start-pause-btn" class="w-full max-w-xs bg-green-500 hover:bg-green-600 text-white text-2xl font-bold py-3 px-6 rounded-lg shadow-md transition">Start Wedstrijd</button>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-blue-200 bg-blue-50">
+            <h2 class="text-xl font-bold mb-3 text-blue-700">Actieve Kaarten</h2>
+            <div class="flex flex-col sm:flex-row justify-between gap-4">
+                <div class="w-full sm:w-1/2">
+                    <h3 class="font-bold home-team-text text-lg mb-1" id="active-cards-home-label">BMHV (Thuis)</h3>
+                    <div id="home-active-cards-container" class="space-y-2">
+                        <p class="text-gray-500" id="no-home-cards">Geen actieve straffen.</p>
+                    </div>
+                </div>
+                <div class="w-full sm:w-1/2">
+                    <h3 class="font-bold away-team-text text-lg mb-1" id="active-cards-away-label">Gastteam (Uit)</h3>
+                    <div id="away-active-cards-container" class="space-y-2">
+                        <p class="text-gray-500" id="no-away-cards">Geen actieve straffen.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Kaart Toekennen</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <p class="font-semibold text-center home-team-text" id="home-card-label">BMHV</p>
+                    <button onclick="prepareEvent('card', 'home', 'groen')" class="card-btn text-green-700 border-2 border-green-500 rounded-lg shadow-sm">
+                        <div class="card-shape green-triangle"></div>
+                        <span class="text-sm font-semibold mt-1">2 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'geel_5')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-5 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">5 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'geel_10')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-10 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">10 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'rood')" class="card-btn text-red-700 border-2 border-red-500 rounded-lg shadow-sm">
+                        <div class="card-shape red-circle"></div>
+                        <span class="text-sm font-semibold mt-1">Rood</span>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <p class="font-semibold text-center away-team-text" id="away-card-label">Gastteam</p>
+                    <button onclick="prepareEvent('card', 'away', 'groen')" class="card-btn text-green-700 border-2 border-green-500 rounded-lg shadow-sm">
+                        <div class="card-shape green-triangle"></div>
+                        <span class="text-sm font-semibold mt-1">2 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'geel_5')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-5 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">5 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'geel_10')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-10 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">10 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'rood')" class="card-btn text-red-700 border-2 border-red-500 rounded-lg shadow-sm">
+                        <div class="card-shape red-circle"></div>
+                        <span class="text-sm font-semibold mt-1">Rood</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Doelpunt Toekennen</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <p class="font-semibold text-center home-team-text" id="home-team-label-goal">BMHV</p>
+                    <button onclick="prepareEvent('goal', 'home', 'strafcorner')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Strafcorner</button>
+                    <button onclick="prepareEvent('goal', 'home', 'velddoelpunt')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Velddoelpunt</button>
+                    <button onclick="prepareEvent('goal', 'home', 'strafbal')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Strafbal</button>
+                </div>
+                <div class="space-y-2">
+                    <p class="font-semibold text-center away-team-text" id="away-team-label-goal">Gastteam</p>
+                    <button onclick="prepareEvent('goal', 'away', 'strafcorner')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Strafcorner</button>
+                    <button onclick="prepareEvent('goal', 'away', 'velddoelpunt')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Velddoelpunt</button>
+                    <button onclick="prepareEvent('goal', 'away', 'strafbal')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Strafbal</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200 bg-gray-50">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Wedstrijd Tijdlijn</h2>
+            <div id="timeline-container" class="space-y-3 max-h-60 overflow-y-auto">
+                <p class="text-gray-500">Tijdlijn van de wedstrijdgebeurtenissen.</p>
+            </div>
+        </div>
+        
+        <div class="flex justify-center pt-2">
+            <button onclick="generatePdf()" id="download-pdf-btn" class="w-full max-w-xs bg-indigo-600 hover:bg-indigo-700 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition hidden">Download Tijdlijn (PDF)</button>
+        </div>
+
+        <div class="flex justify-center pt-2 mb-2">
+            <button onclick="showResetConfirmation()" class="w-full max-w-xs bg-red-600 hover:bg-red-700 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Reset Wedstrijd</button>
+        </div>
+        
+        <div class="flex justify-center pt-2 mb-2">
+            <button onclick="undoLastGoal()" class="w-full max-w-xs bg-yellow-500 hover:bg-yellow-600 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Laatste Doelpunt Ongedaan Maken</button>
+        </div>
+        
+        <div class="flex justify-center pt-2 mb-6">
+            <button onclick="showConfigModal()" class="w-full max-w-xs bg-indigo-500 hover:bg-indigo-600 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Wedstrijd Instellingen</button>
+        </div>
+    </div>
+
+    <div id="message-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 id="modal-title" class="text-lg font-bold mb-2">Melding</h3>
+            <p id="modal-message" class="mb-4 text-gray-700"></p>
+            <button onclick="closeModal('message-modal')" class="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">OK</button>
+        </div>
+    </div>
+
+    <div id="event-input-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 id="input-modal-title" class="text-xl font-bold mb-4">Voer Rugnummer In</h3>
+            
+            <p id="input-modal-description" class="mb-4 text-gray-700"></p>
+            
+            <input type="number" id="rugnummer-input" class="w-full p-3 border-2 border-indigo-300 rounded-lg text-2xl text-center mb-6" placeholder="Rugnummer">
+            
+            <div class="flex space-x-4">
+                <button onclick="closeModal('event-input-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="handleEventConfirm()" class="w-1/2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Bevestig</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reset-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 class="text-xl font-bold mb-2 text-red-600">Bevestig Reset</h3>
+            <p class="mb-6 text-gray-700">Weet u zeker dat u de hele wedstrijd wilt resetten? Alle scores, kaarten en de tijdlijn gaan verloren.</p>
+            
+            <div class="flex space-x-4">
+                <button onclick="closeModal('reset-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="resetMatch()" class="w-1/2 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700">Reset</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="config-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 class="text-xl font-bold mb-4 text-indigo-700">Wedstrijd Instellingen</h3>
+            
+            <div class="mb-4">
+                <label for="quarter-count-input" class="block text-sm font-medium text-gray-700 mb-1">Aantal Kwarten (1-4):</label>
+                <input type="number" id="quarter-count-input" min="1" max="4" value="4" class="w-full p-3 border-2 border-indigo-300 rounded-lg text-lg text-center">
+            </div>
+
+            <div class="mb-6">
+                <label for="quarter-duration-min-input" class="block text-sm font-medium text-gray-700 mb-1">Tijd per Kwart (MM:SS):</label>
+                <div class="flex space-x-2">
+                    <input type="number" id="quarter-duration-min-input" min="1" max="60" value="17" class="w-1/2 p-3 border-2 border-indigo-300 rounded-lg text-lg text-center" placeholder="Minuten">
+                    <input type="number" id="quarter-duration-sec-input" min="0" max="59" value="30" class="w-1/2 p-3 border-2 border-indigo-300 rounded-lg text-lg text-center" placeholder="Seconden">
+                </div>
+            </div>
+
+            <div class="flex space-x-4">
+                <button onclick="closeModal('config-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="saveConfig()" class="w-1/2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- CONSTANTEN & STATE ---
+        // Standaardwaarden, deze worden nu in 'state' beheerd voor configuratie
+        const DEFAULT_DURATION_SECONDS = 17 * 60 + 30; // 17:30 minuten
+        const CARD_TIMES = {
+            'groen': 120,    // 2 minuten
+            'geel_5': 300,  // 5 minuten
+            'geel_10': 600 // 10 minuten
+        };
+        const SIGNAL_COUNTS = {
+            'groen': 2,
+            'geel_5': 5,
+            'geel_10': 10
+        };
+
+        let state = {
+            quarter: 1,
+            matchTimeSeconds: DEFAULT_DURATION_SECONDS,
+            isRunning: false,
+            matchTimerInterval: null,
+            teams: {
+                home: { name: 'BMHV', color: 'home-team-text', score: 0, buttonColor: '#800000' },
+                away: { name: 'Gastteam', color: 'away-team-text', score: 0, buttonColor: '#3b82f6' }
+            },
+            activeCards: [], 
+            timeline: [], 
+            pauseStartTime: null,
+            pendingEvent: null,
+            // NIEUWE CONFIGURATIE STATE
+            quarterCount: 4, 
+            defaultQuarterDuration: DEFAULT_DURATION_SECONDS // 1050 seconds (17:30)
+        };
+
+        const QUARTER_NAMES = {
+            1: '1e Kwart',
+            2: '2e Kwart',
+            3: '3e Kwart',
+            4: '4e Kwart'
+        };
+
+        // --- DOM ELEMENTEN ---
+        const dom = {
+            matchTimer: document.getElementById('match-timer'),
+            quarterDisplay: document.getElementById('quarter-display'),
+            homeScore: document.getElementById('home-score'),
+            awayScore: document.getElementById('away-score'),
+            homeTeamLabelGoal: document.getElementById('home-team-label-goal'),
+            awayTeamLabelGoal: document.getElementById('away-team-label-goal'),
+            homeActiveCardsContainer: document.getElementById('home-active-cards-container'),
+            awayActiveCardsContainer: document.getElementById('away-active-cards-container'),
+            noHomeCards: document.getElementById('no-home-cards'),
+            noAwayCards: document.getElementById('no-away-cards'),
+            timelineContainer: document.getElementById('timeline-container'),
+            startPauseBtn: document.getElementById('start-pause-btn'),
+            homeTeamInput: document.getElementById('home-team-input'),
+            awayTeamInput: document.getElementById('away-team-input'),
+            activeCardsHomeLabel: document.getElementById('active-cards-home-label'),
+            activeCardsAwayLabel: document.getElementById('active-cards-away-label'),
+            app: document.getElementById('app'),
+            
+            // Modal elementen
+            messageModal: document.getElementById('message-modal'),
+            eventInputModal: document.getElementById('event-input-modal'),
+            inputModalDescription: document.getElementById('input-modal-description'),
+            rugnummerInput: document.getElementById('rugnummer-input'),
+            resetModal: document.getElementById('reset-modal'),
+            downloadPdfBtn: document.getElementById('download-pdf-btn'),
+            
+            // NIEUWE CONFIG ELEMENTEN
+            configModal: document.getElementById('config-modal'),
+            quarterCountInput: document.getElementById('quarter-count-input'),
+            quarterDurationMinInput: document.getElementById('quarter-duration-min-input'),
+            quarterDurationSecInput: document.getElementById('quarter-duration-sec-input')
+        };
+
+
+        // --- HULPFUNCTIES ---
+
+        /** Formatteert seconden naar MM:SS */
+        function formatTime(totalSeconds) {
+            const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
+            const seconds = Math.floor(Math.max(0, totalSeconds) % 60);
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        /** Formatteert timestamp naar Nederlandse datum en tijd */
+        function formatAbsoluteTime(timestamp) {
+            return new Date(timestamp).toLocaleString('nl-NL', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        /** Toont een modale melding in plaats van alert() */
+        function showModal(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            dom.messageModal.classList.remove('hidden');
+            dom.messageModal.classList.add('flex');
+        }
+
+        /** Sluit een modale melding */
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+            document.getElementById(id).classList.remove('flex');
+            // Reset de rugnummer invoer
+            if (id === 'event-input-modal') {
+                dom.rugnummerInput.value = '';
+                state.pendingEvent = null;
+            }
+        }
+
+        /** Speelt een geluidssignaal af */
+        function playSignal(frequency, duration, count, delay = 0) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const audioContext = new AudioContext();
+
+            let interval;
+            let currentBeep = 0;
+
+            function beep() {
+                if (currentBeep >= count) {
+                    clearInterval(interval);
+                    return;
+                }
+
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+                
+                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+
+                if (duration > 1000) { 
+                    gainNode.gain.setValueAtTime(0.2, audioContext.currentTime + (duration / 1000) - 0.05); 
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + duration / 1000);
+                } else { 
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + duration / 1000);
+                }
+
+
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + duration / 1000);
+
+                currentBeep++;
+            }
+
+            if (delay > 0) {
+                setTimeout(() => {
+                    beep();
+                    if (count > 1) {
+                        interval = setInterval(beep, duration + 100);
+                    }
+                }, delay);
+            } else {
+                beep(); 
+                if (count > 1) {
+                    interval = setInterval(beep, duration + 100);
+                }
+            }
+        }
+
+        /** Activeert trilling op ondersteunende apparaten */
+        function vibratePhone() {
+            if (navigator.vibrate) {
+                navigator.vibrate([300, 100, 300, 100, 300]); 
+            }
+        }
+
+
+        // --- RENDER FUNCTIES ---
+
+        /** Render de wedstrijdklok en het kwart */
+        function renderMainTimer() {
+            dom.matchTimer.textContent = formatTime(state.matchTimeSeconds);
+            dom.quarterDisplay.textContent = QUARTER_NAMES[state.quarter] || `Kwart ${state.quarter}`;
+
+            if (state.matchTimeSeconds <= 0) {
+                dom.matchTimer.classList.add('text-red-300');
+            } else {
+                dom.matchTimer.classList.remove('text-red-300');
+            }
+        }
+
+        /** Render de score */
+        function renderScore() {
+            dom.homeScore.textContent = state.teams.home.score;
+            dom.awayScore.textContent = state.teams.away.score;
+        }
+
+        /** Render de teamnamen */
+        function renderTeamNames() {
+            const homeName = state.teams.home.name;
+            const awayName = state.teams.away.name;
+
+            dom.homeTeamLabelGoal.textContent = homeName;
+            dom.awayTeamLabelGoal.textContent = awayName;
+            
+            // Update Card Labels
+            document.getElementById('home-card-label').textContent = homeName;
+            document.getElementById('away-card-label').textContent = awayName;
+            
+            // Update Active Card Headers
+            dom.activeCardsHomeLabel.textContent = `${homeName} (Thuis)`;
+            dom.activeCardsAwayLabel.textContent = `${awayName} (Uit)`;
+        }
+
+        /** Render de lijst met actieve kaarten (per team, naast elkaar) */
+        function renderActiveCards() {
+            const homeCards = state.activeCards.filter(c => c.team === 'home');
+            const awayCards = state.activeCards.filter(c => c.team === 'away');
+
+            dom.homeActiveCardsContainer.innerHTML = '';
+            dom.awayActiveCardsContainer.innerHTML = '';
+
+            // Thuisploeg
+            if (homeCards.length === 0) { dom.noHomeCards.classList.remove('hidden'); } else { dom.noHomeCards.classList.add('hidden'); }
+            renderCardList(homeCards, dom.homeActiveCardsContainer, state.teams.home.color);
+
+            // Uitploeg
+            if (awayCards.length === 0) { dom.noAwayCards.classList.remove('hidden'); } else { dom.noAwayCards.classList.add('hidden'); }
+            renderCardList(awayCards, dom.awayActiveCardsContainer, state.teams.away.color);
+        }
+
+        function renderCardList(cards, container, teamColorClass) {
+            const cardStyles = {
+                'groen': 'bg-green-100 border-green-400',
+                'geel_5': 'bg-yellow-100 border-yellow-400',
+                'geel_10': 'bg-yellow-100 border-yellow-400',
+                'rood': 'bg-red-100 border-red-400'
+            };
+            const cardTypes = {
+                'groen': 'Groen (2 min)', 'geel_5': 'Geel (5 min)', 'geel_10': 'Geel (10 min)', 'rood': 'Rood (UIT)'
+            };
+            const cardTextColors = {
+                'groen': 'text-green-800',
+                'geel_5': 'text-yellow-800',
+                'geel_10': 'text-yellow-800',
+                'rood': 'text-red-800'
+            };
+
+            cards.forEach(card => {
+                const timeStr = formatTime(card.timeRemaining);
+                const isRunningClass = state.isRunning && card.timeRemaining > 0 ? 'active-timer border-4' : '';
+                const cardIsActive = card.type !== 'rood' && card.timeRemaining > 0;
+                
+                // Voeg rugnummer toe aan weergave
+                const rugnummerDisplay = card.rugnummer ? `<span class="font-black text-2xl mr-2">${card.rugnummer}</span>` : '';
+
+                const cardHtml = `
+                    <div id="card-${card.id}" class="flex justify-between items-center p-3 rounded-lg ${cardStyles[card.type]} ${isRunningClass}">
+                        <div class="flex items-center">
+                            ${rugnummerDisplay}
+                            <span class="${cardTextColors[card.type]} font-bold text-sm">${cardTypes[card.type]}</span>
+                        </div>
+                        <span class="text-xl font-mono ${cardIsActive ? 'text-red-600' : 'text-gray-500'}">
+                            ${cardIsActive ? timeStr : 'Klaar'}
+                        </span>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', cardHtml);
+            });
+        }
+
+        /** Render de tijdlijn */
+        function renderTimeline() {
+            dom.timelineContainer.innerHTML = '';
+            
+            state.timeline.slice().reverse().forEach(item => {
+                let colorClass = 'text-gray-700';
+                let finalIcon = '';
+                
+                const quarterText = QUARTER_NAMES[item.quarter] || `Kwart ${item.quarter}`;
+                let timeDisplay = `<span class="text-sm text-gray-500">[${quarterText} - ${item.time}]</span>`;
+
+                // Bepaal kleur en icoon
+                if (item.event.includes('Doelpunt')) {
+                    colorClass = item.team === 'home' ? state.teams.home.color : state.teams.away.color;
+                    finalIcon = '🏑 '; // Veldhockey stok en bal icoon
+                } else if (item.event.includes('Groene Kaart')) {
+                    colorClass = 'text-green-600';
+                    finalIcon = '▲ '; // Groene Driehoek
+                } else if (item.event.includes('Gele Kaart')) {
+                    colorClass = 'text-yellow-600';
+                    finalIcon = '■ '; // Gele Vierkant
+                } else if (item.event.includes('Rode Kaart')) {
+                    colorClass = 'text-red-600';
+                    finalIcon = '🔴 '; // Rode Cirkel
+                } else if (item.event.includes('Pauze')) {
+                    colorClass = 'text-blue-600 italic';
+                    finalIcon = '⏸️ ';
+                } else if (item.event.includes('OFFICIËLE WEDSTRIJDSTART')) {
+                    const absoluteTime = formatAbsoluteTime(item.timestamp);
+                    timeDisplay = `<span class="text-xs font-bold text-indigo-700 block mb-0.5">Start Tijd: ${absoluteTime}</span><span class="text-sm text-gray-500">[${quarterText} - ${item.time}]</span>`;
+                    colorClass = 'text-indigo-600 font-bold'; 
+                    finalIcon = '▶️ ';
+                } else if (item.event.includes('Einde van')) {
+                    colorClass = 'text-indigo-600 font-bold'; 
+                    finalIcon = '🏁 ';
+                } else if (item.event.includes('Start van')) {
+                    colorClass = 'text-indigo-600 font-bold'; 
+                    finalIcon = '▶️ ';
+                } else if (item.event.includes('Waarschuwing')) {
+                    colorClass = 'text-orange-600';
+                    finalIcon = '🔔 ';
+                }
+                
+                // Voeg rugnummer toe aan event tekst
+                const rugnummer = item.rugnummer ? ` (Nr. ${item.rugnummer})` : '';
+                let eventText = item.event.replace(/\.$/, `${rugnummer}.`); // Voeg toe voor de punt
+
+                const html = `
+                    <div class="border-l-4 border-gray-300 pl-3">
+                        ${timeDisplay}
+                        <p class="${colorClass} text-base">${finalIcon}${eventText}</p>
+                    </div>
+                `;
+                dom.timelineContainer.insertAdjacentHTML('beforeend', html);
+            });
+        }
+
+        /** Hoofdfunctie om alle weergaven te updaten */
+        function updateDisplay() {
+            renderMainTimer();
+            renderScore();
+            renderActiveCards();
+            renderTimeline();
+            
+            const isMatchOver = state.matchTimeSeconds <= 0 && state.quarter >= state.quarterCount;
+
+            // Toon PDF knop alleen als de wedstrijd voorbij is
+            if (isMatchOver) {
+                dom.downloadPdfBtn.classList.remove('hidden');
+            } else {
+                dom.downloadPdfBtn.classList.add('hidden');
+            }
+            
+            // Update Start/Pause knop tekst en styling
+            if (state.isRunning) {
+                dom.startPauseBtn.textContent = 'Pauzeer Wedstrijd';
+                dom.startPauseBtn.classList.remove('bg-green-500', 'hover:bg-green-600', 'bg-blue-500', 'hover:bg-blue-600');
+                dom.startPauseBtn.classList.add('bg-orange-500', 'hover:bg-orange-600');
+                dom.app.classList.remove('paused-state');
+                dom.startPauseBtn.disabled = false;
+            } else if (state.matchTimeSeconds <= 0 && state.quarter < state.quarterCount) {
+                dom.startPauseBtn.textContent = `Start ${QUARTER_NAMES[state.quarter + 1] || `Kwart ${state.quarter + 1}`}`;
+                dom.startPauseBtn.classList.remove('bg-orange-500', 'hover:bg-orange-600', 'bg-green-500', 'hover:bg-green-600');
+                dom.startPauseBtn.classList.add('bg-blue-500', 'hover:bg-blue-600'); 
+                dom.app.classList.add('paused-state');
+                dom.startPauseBtn.disabled = false;
+            } else if (isMatchOver) {
+                 dom.startPauseBtn.textContent = 'Wedstrijd Voorbij';
+                 dom.startPauseBtn.classList.remove('bg-green-500', 'hover:bg-green-600', 'bg-orange-500', 'hover:bg-orange-600', 'bg-blue-500', 'hover:bg-blue-600');
+                 dom.startPauseBtn.classList.add('bg-gray-400');
+                 dom.startPauseBtn.disabled = true;
+            } else {
+                dom.startPauseBtn.textContent = state.matchTimeSeconds === state.defaultQuarterDuration ? 'Start Wedstrijd' : 'Hervat Wedstrijd';
+                dom.startPauseBtn.classList.remove('bg-orange-500', 'hover:bg-orange-600', 'bg-blue-500', 'hover:bg-blue-600');
+                dom.startPauseBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+                dom.app.classList.add('paused-state');
+                dom.startPauseBtn.disabled = false;
+            }
+        }
+
+        // --- WEDSTRIJD LOGICA ---
+
+        /** Telt de tijd per seconde af */
+        function tick() {
+            if (!state.isRunning) return;
+
+            // 1. Wedstrijdklok 
+            if (state.matchTimeSeconds > 0) {
+                state.matchTimeSeconds--;
+
+                // 2-Minuten Waarschuwing (120 seconden over)
+                if (state.matchTimeSeconds === 120) {
+                    // Signaal 1: 880Hz, 200ms
+                    playSignal(880, 200, 1); 
+                    vibratePhone();
+                    
+                    // Wacht 3 seconden en Signaal 2
+                    setTimeout(() => {
+                        playSignal(880, 200, 1);
+                        vibratePhone(); 
+                    }, 3000); 
+                    
+                    logEvent(`2-Minuten Waarschuwing voor einde ${QUARTER_NAMES[state.quarter]}.`);
+                }
+
+            } else {
+                // Wedstrijdklok is 0, automatisch pauzeren
+                clearInterval(state.matchTimerInterval);
+                state.matchTimerInterval = null;
+                state.isRunning = false;
+                logEvent(`Einde van ${QUARTER_NAMES[state.quarter]}.`);
+                
+                updateDisplay();
+                
+                // 5-Seconden Signaal voor Einde Kwart
+                playSignal(600, 5000, 1); // 600Hz, 5 seconden lang
+                vibratePhone();
+
+                const title = state.quarter < state.quarterCount ? 'Einde Kwart' : 'Einde Wedstrijd';
+                const nextQuarterName = QUARTER_NAMES[state.quarter + 1] || `Kwart ${state.quarter + 1}`;
+                const message = state.quarter < state.quarterCount ? `${QUARTER_NAMES[state.quarter]} is voorbij. Druk op de knop om ${nextQuarterName} te starten.` : 'De wedstrijd is afgelopen. U kunt de tijdlijn nu downloaden als PDF.';
+
+                showModal(title, message);
+                return;
+            }
+
+            // 2. Kaart Timers
+            let cardsUpdated = false;
+            state.activeCards = state.activeCards.map(card => {
+                if (card.timeRemaining > 0) {
+                    card.timeRemaining--;
+                    cardsUpdated = true;
+                }
+                return card;
+            });
+
+            // Controleer op verlopen kaarten en signaleer
+            state.activeCards.filter(card => card.timeRemaining === 0 && card.type !== 'rood').forEach(card => {
+                const element = document.getElementById(`card-${card.id}`);
+                if (element && element.dataset.signaled !== 'true') {
+                    const teamName = state.teams[card.team].name;
+                    const rugnummer = card.rugnummer ? ` (Nr. ${card.rugnummer})` : '';
+                    logEvent(`${card.type.toUpperCase().replace('_', '-')} Kaart voor ${teamName} is afgelopen.`, 'card', card.team, card.rugnummer);
+                    
+                    // Signaal en trilling voor verlopen kaart
+                    playSignal(440, 200, SIGNAL_COUNTS[card.type]);
+                    vibratePhone();
+                    
+                    element.dataset.signaled = 'true'; 
+                }
+            });
+
+            // Filter verlopen kaarten (behalve rood, die blijft staan)
+            state.activeCards = state.activeCards.filter(card => card.timeRemaining > 0 || card.type === 'rood');
+
+            updateDisplay();
+        }
+
+        /** Advance the quarter and reset the main timer */
+        function advanceQuarter() {
+            if (state.quarter >= state.quarterCount) {
+                logEvent(`Einde Wedstrijd! Eindscore: ${state.teams.home.score} - ${state.teams.away.score}.`);
+                showModal('Wedstrijd Voorbij', 'De wedstrijd is afgelopen. U kunt de tijdlijn en score resetten.');
+                return;
+            }
+
+            state.quarter++;
+            state.matchTimeSeconds = state.defaultQuarterDuration;
+            logEvent(`Start van ${QUARTER_NAMES[state.quarter] || `Kwart ${state.quarter}`}.`, 'start');
+            
+            // Start de timer direct na de overgang
+            state.isRunning = true;
+            state.pauseStartTime = Date.now();
+            state.matchTimerInterval = setInterval(tick, 1000);
+
+            updateDisplay();
+        }
+
+        /** Start of pauzeert de wedstrijdklok of start een nieuw kwart */
+        function startPauseMatch() {
+            if (state.matchTimeSeconds <= 0 && state.quarter < state.quarterCount) {
+                // Start volgend kwart
+                advanceQuarter();
+                return;
+            }
+            
+            if (state.matchTimeSeconds <= 0 && state.quarter >= state.quarterCount) {
+                // Wedstrijd is voorbij
+                return;
+            }
+
+            const now = Date.now();
+
+            if (state.isRunning) {
+                // Pauzeren
+                clearInterval(state.matchTimerInterval);
+                state.matchTimerInterval = null;
+                state.isRunning = false;
+
+                const pauseDuration = Math.floor((Date.now() - state.pauseStartTime) / 1000);
+                if (pauseDuration > 0 && state.matchTimeSeconds < state.defaultQuarterDuration) {
+                    logEvent(`Pauze (tijdens spel) van ${pauseDuration} sec.`, 'pause');
+                }
+            } else {
+                // STARTEN / HERVATTEN
+                
+                // 1. Log de officiële start van het 1e Kwart
+                if (state.quarter === 1 && state.matchTimeSeconds === state.defaultQuarterDuration) {
+                    logEvent(`OFFICIËLE WEDSTRIJDSTART: ${QUARTER_NAMES[1]}.`, 'start');
+                }
+                
+                state.isRunning = true;
+                state.pauseStartTime = now;
+                state.matchTimerInterval = setInterval(tick, 1000);
+            }
+
+            updateDisplay();
+        }
+
+        /** Voegt een gebeurtenis toe aan de tijdlijn */
+        function logEvent(event, type = 'general', team = null, rugnummer = null) {
+            const elapsedSeconds = state.defaultQuarterDuration - state.matchTimeSeconds;
+            const timeAtEvent = formatTime(elapsedSeconds);
+
+            state.timeline.push({
+                timestamp: Date.now(), // Absolute tijdstempel toegevoegd
+                quarter: state.quarter,
+                time: timeAtEvent,
+                event: event,
+                team: team,
+                rugnummer: rugnummer 
+            });
+            renderTimeline();
+        }
+        
+        /** Maakt het laatste doelpunt in de tijdlijn ongedaan */
+        function undoLastGoal() {
+            // Zoek naar het laatste 'goal' event in de tijdlijn, beginnend bij de meest recente
+            let lastGoalIndex = -1;
+            
+            for (let i = state.timeline.length - 1; i >= 0; i--) {
+                const item = state.timeline[i];
+                // Controleer of het een doelpunt is (door de tekst 'Doelpunt' te controleren)
+                if (item.event.includes('Doelpunt')) { 
+                    lastGoalIndex = i;
+                    break;
+                }
+            }
+
+            if (lastGoalIndex !== -1) {
+                const lastGoalEvent = state.timeline[lastGoalIndex];
+                const team = lastGoalEvent.team; // 'home' of 'away'
+                const teamName = state.teams[team].name;
+                
+                // 1. Controleer of de score kan worden verlaagd
+                if (state.teams[team].score > 0) {
+                    state.teams[team].score--; // Verlaag de score
+                    
+                    // 2. Verwijder het event uit de tijdlijn
+                    state.timeline.splice(lastGoalIndex, 1);
+                    
+                    // 3. Update de weergave
+                    updateDisplay();
+                    showModal('Doelpunt Ongedaan Gemaakt', `Het laatste doelpunt voor ${teamName} is ongedaan gemaakt. De score is nu ${state.teams.home.score} - ${state.teams.away.score}.`);
+                } else {
+                    // Dit vangt onverwachte toestanden op
+                    showModal('Fout', `Kan het doelpunt voor ${teamName} niet ongedaan maken. Score is al 0.`);
+                }
+            } else {
+                showModal('Melding', 'Er zijn geen doelpunten meer in de tijdlijn om ongedaan te maken.');
+            }
+        }
+
+
+        // --- CONFIG FUNCTIES ---
+        
+        function showConfigModal() {
+            // Laad huidige state in inputs
+            dom.quarterCountInput.value = state.quarterCount;
+            
+            const minutes = Math.floor(state.defaultQuarterDuration / 60);
+            const seconds = state.defaultQuarterDuration % 60;
+            dom.quarterDurationMinInput.value = minutes;
+            dom.quarterDurationSecInput.value = seconds;
+            
+            dom.configModal.classList.remove('hidden');
+            dom.configModal.classList.add('flex');
+        }
+
+        function saveConfig() {
+            const newQuarterCount = parseInt(dom.quarterCountInput.value);
+            const newDurationMin = parseInt(dom.quarterDurationMinInput.value);
+            const newDurationSec = parseInt(dom.quarterDurationSecInput.value);
+
+            // Basic validation
+            if (isNaN(newQuarterCount) || newQuarterCount < 1 || newQuarterCount > 4 ||
+                isNaN(newDurationMin) || newDurationMin < 0 ||
+                isNaN(newDurationSec) || newDurationSec < 0 || newDurationSec > 59) {
+                showModal('Fout', 'Voer geldige waarden in voor het aantal kwarten (1-4) en de tijd (minuten/seconden).');
+                return;
+            }
+            
+            const newDurationSeconds = (newDurationMin * 60) + newDurationSec;
+
+            // Update state
+            state.quarterCount = newQuarterCount;
+            state.defaultQuarterDuration = newDurationSeconds;
+
+            // Als de wedstrijd nog niet gestart is of gereset is, pas de tijd aan
+            if (!state.isRunning && state.matchTimeSeconds === DEFAULT_DURATION_SECONDS) {
+                state.matchTimeSeconds = newDurationSeconds;
+            }
+
+            // Forceer een weergave-update
+            updateDisplay();
+            closeModal('config-modal');
+            showModal('Instellingen Opgeslagen', `Wedstrijd geconfigureerd: ${newQuarterCount} kwarten van ${formatTime(newDurationSeconds)}.`);
+        }
+
+
+        // --- PDF GENERATIE ---
+
+        /** Genereert en downloadt de wedstrijd tijdlijn als PDF */
+        function generatePdf() {
+            const { jsPDF } = window.jspdf;
+            if (!jsPDF || !window.jspdf.autoTable) {
+                showModal("Fout", "PDF-bibliotheek is niet geladen. Probeer de pagina te herladen of controleer de internetverbinding.");
+                return;
+            }
+
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'a4'
+            });
+
+            const homeName = state.teams.home.name;
+            const awayName = state.teams.away.name;
+            const finalScore = `${homeName}: ${state.teams.home.score} - ${awayName}: ${state.teams.away.score}`;
+
+            // PDF Titel
+            doc.setFontSize(18);
+            doc.text("Hockey Wedstrijd Tijdlijn Rapport", 14, 20);
+
+            doc.setFontSize(12);
+            doc.text(`Teams: ${homeName} vs ${awayName}`, 14, 30);
+            doc.text(`Eindscore: ${finalScore}`, 14, 37);
+            doc.text(`Datum gegenereerd: ${formatAbsoluteTime(Date.now())}`, 14, 44);
+
+
+            // Tijdlijn Data voor AutoTable
+            const headers = [["Absolute Tijd", "Kwart Tijd", "Gebeurtenis", "Rugnr."]];
+            const body = state.timeline.map(item => {
+                const absoluteTime = formatAbsoluteTime(item.timestamp);
+                
+                // Formatteer de gebeurtenis tekst voor de tabel
+                const quarterText = QUARTER_NAMES[item.quarter] || `Kwart ${item.quarter}`;
+                let eventText = item.event;
+                
+                // Bepaal icoon voor de PDF
+                let icon = '';
+                if (item.event.includes('Doelpunt')) {
+                    icon = '🏑'; // Veldhockey stok en bal icoon
+                } else if (item.event.includes('Groene Kaart')) {
+                    icon = '▲'; 
+                } else if (item.event.includes('Gele Kaart')) {
+                    icon = '■'; 
+                } else if (item.event.includes('Rode Kaart')) {
+                    icon = '🔴'; 
+                } else if (item.event.includes('Pauze')) {
+                    icon = '⏸️';
+                } else if (item.event.includes('Einde van')) {
+                    icon = '🏁';
+                } else if (item.event.includes('START') || item.event.includes('Start van')) {
+                    icon = '▶️';
+                }
+
+                // Voeg icoon toe aan de tekst
+                if (icon) {
+                    eventText = icon + ' ' + eventText; 
+                }
+                
+                // Tekst opschonen
+                if (item.event.includes('OFFICIËLE WEDSTRIJDSTART')) {
+                    eventText = `START: ${quarterText}`;
+                } else if (item.event.includes('Einde van')) {
+                    eventText = item.event.replace(/\.$/, "");
+                } else if (item.event.includes('Start van')) {
+                    eventText = item.event.replace(/\.$/, "");
+                }
+
+
+                return [
+                    absoluteTime.split(',')[0] + '\n' + absoluteTime.split(',')[1].trim(), // Datum op aparte regel
+                    `[${quarterText} - ${item.time}]`,
+                    eventText,
+                    item.rugnummer || '-'
+                ];
+            });
+
+            // Gebruik jspdf-autotable
+            doc.autoTable({
+                startY: 55,
+                head: headers,
+                body: body,
+                theme: 'striped',
+                headStyles: { fillColor: [79, 70, 229] }, // Indigo 600
+                styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+                columnStyles: {
+                    0: { cellWidth: 35 }, // Datum/Tijd
+                    1: { cellWidth: 25 }, // Kwart Tijd
+                    3: { cellWidth: 15 }  // Rugnr.
+                }
+            });
+
+            // Bestandsnaam
+            const date = new Date().toISOString().slice(0, 10);
+            doc.save(`HockeyTijdlijn_${homeName}_vs_${awayName}_${date}.pdf`);
+        }
+
+
+        // --- GEBEURTENIS HANDLERS (MET MODAL) ---
+
+        /** Bereid de gebeurtenis voor en toon de rugnummer modal */
+        function prepareEvent(type, team, subType) {
+            state.pendingEvent = { type, team, subType };
+            
+            const teamName = state.teams[team].name;
+            let description = '';
+
+            if (type === 'card') {
+                const cardText = subType === 'groen' ? 'Groene Kaart' : subType === 'rood' ? 'Rode Kaart' : subType === 'geel_5' ? 'Gele Kaart (5 min)' : 'Gele Kaart (10 min)';
+                description = `Voer het rugnummer in voor de ${cardText} van ${teamName}.`;
+            } else if (type === 'goal') {
+                let goalText;
+                switch (subType) {
+                    case 'strafcorner': goalText = 'Strafcorner'; break;
+                    case 'velddoelpunt': goalText = 'Velddoelpunt'; break;
+                    case 'strafbal': goalText = 'Strafbal'; break;
+                    default: goalText = 'Doelpunt';
+                }
+                description = `Voer het rugnummer in voor het ${goalText} van ${teamName}.`;
+            }
+
+            dom.inputModalDescription.textContent = description;
+            dom.eventInputModal.classList.remove('hidden');
+            dom.eventInputModal.classList.add('flex');
+            dom.rugnummerInput.focus();
+        }
+
+        /** Verwerkt de invoer van de modal en voert de gebeurtenis uit */
+        function handleEventConfirm() {
+            const rugnummer = dom.rugnummerInput.value.trim();
+            const event = state.pendingEvent;
+
+            if (!event) {
+                closeModal('event-input-modal');
+                return;
+            }
+
+            // Registreer de gebeurtenis, ook als er geen nummer is ingevoerd
+            if (event.type === 'card') {
+                applyCard(event.team, event.subType, rugnummer);
+            } else if (event.type === 'goal') {
+                addGoal(event.team, event.subType, rugnummer);
+            }
+
+            closeModal('event-input-modal');
+        }
+
+
+        /** Verwerkt het toekennen van een kaart (NU MET RUGNUMMER) */
+        function applyCard(team, cardType, rugnummer) {
+            const teamName = state.teams[team].name;
+            const cardId = Date.now();
+            let cardEvent = `${teamName}: `;
+
+            if (cardType === 'rood') {
+                state.activeCards.push({ id: cardId, team, type: 'rood', timeRemaining: 0, rugnummer });
+                cardEvent += 'Rode Kaart (definitief uitgesloten).';
+            } else {
+                const time = CARD_TIMES[cardType];
+                state.activeCards.push({ id: cardId, team, type: cardType, timeRemaining: time, rugnummer });
+                cardEvent += `${cardType === 'groen' ? 'Groene' : 'Gele'} Kaart (${time / 60} min) toegekend.`;
+            }
+
+            logEvent(cardEvent, 'card', team, rugnummer);
+            renderActiveCards();
+        }
+
+        /** Verwerkt het toekennen van een doelpunt (NU MET RUGNUMMER) */
+        function addGoal(team, goalType, rugnummer) {
+            state.teams[team].score++;
+            const teamName = state.teams[team].name;
+            let goalTypeName;
+
+            switch (goalType) {
+                case 'strafcorner': goalTypeName = 'Strafcorner'; break;
+                case 'velddoelpunt': goalTypeName = 'Velddoelpunt'; break;
+                case 'strafbal': goalTypeName = 'Strafbal'; break;
+                default: goalTypeName = 'Doelpunt';
+            }
+
+            logEvent(`Doelpunt voor ${teamName} (${goalTypeName}). Score: ${state.teams.home.score} - ${state.teams.away.score}.`, 'goal', team, rugnummer);
+            renderScore();
+        }
+
+        /** Update de teamnaam in de state */
+        function updateTeamName(team, name) {
+            state.teams[team].name = name.trim() || (team === 'home' ? 'Thuis' : 'Uit');
+            renderTeamNames();
+        }
+
+        /** Toon de reset bevestiging modal */
+        function showResetConfirmation() {
+            dom.resetModal.classList.remove('hidden');
+            dom.resetModal.classList.add('flex');
+        }
+
+        /** Reset de hele wedstrijdstaat */
+        function resetMatch() {
+            // Stop de timer
+            if (state.matchTimerInterval) {
+                clearInterval(state.matchTimerInterval);
+                state.matchTimerInterval = null;
+            }
+
+            // Reset de hele state naar de initiële waarden, met behoud van configuratie
+            state = {
+                quarter: 1,
+                matchTimeSeconds: state.defaultQuarterDuration, // Gebruik geconfigureerde tijd
+                isRunning: false,
+                matchTimerInterval: null,
+                teams: {
+                    home: { name: dom.homeTeamInput.value, color: 'home-team-text', score: 0, buttonColor: '#800000' },
+                    away: { name: dom.awayTeamInput.value, color: 'away-team-text', score: 0, buttonColor: '#3b82f6' }
+                },
+                activeCards: [],
+                timeline: [],
+                pauseStartTime: null,
+                pendingEvent: null,
+                quarterCount: state.quarterCount,
+                defaultQuarterDuration: state.defaultQuarterDuration
+            };
+            
+            closeModal('reset-modal');
+            updateDisplay();
+            logEvent(`Wedstrijd is gereset. Nieuwe start: ${state.teams.home.name} tegen ${state.teams.away.name}.`);
+            
+            // Zet knop terug naar start
+            dom.startPauseBtn.classList.remove('bg-gray-400');
+        }
+
+        // --- INITIALISATIE ---
+
+        window.onload = function() {
+            // Initialiseer teamnamen met de default waardes van de inputs
+            state.teams.home.name = dom.homeTeamInput.value;
+            state.teams.away.name = dom.awayTeamInput.value;
+
+            // Roep de update functie aan om de initiële staat te renderen
+            renderTeamNames(); // Update alle labels direct
+            updateDisplay();
+            logEvent(`Wedstrijd voorbereid: ${state.teams.home.name} tegen ${state.teams.away.name}.`);
+        };
+    </script>
+</body>
+</html>
