@@ -1,2 +1,2 @@
-# Hockeyscheidsrechter-
+# Hockeyscheids
 Hockeyscheidsrechter gear
